@@ -19,6 +19,20 @@ function Read-Hidden([string]$label) {
   try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
+function Read-Token-Safely {
+  Write-Host 'Copy the API Token from @BotFather > /mybots > your bot > API Token.'
+  Write-Host 'C = Windows clipboard; H = hidden prompt. Never send token to ChatGPT.'
+  $choice=(Read-Host 'Choose C or H').Trim().ToUpperInvariant()
+  if($choice -eq 'C'){$raw=[string](Get-Clipboard -Raw -ErrorAction Stop)}
+  elseif($choice -eq 'H'){$raw=Read-Hidden 'Bot token (hidden; right-click to paste if Ctrl+V fails)'}
+  else{throw 'Choose C or H, not your bot name.'}
+  $found=[regex]::Match($raw,'(?<![A-Za-z0-9_-])([0-9]{7,15}:[A-Za-z0-9_-]{25,})(?![A-Za-z0-9_-])')
+  if($choice -eq 'C' -and $found.Success){try{Set-Clipboard -Value '' -ErrorAction SilentlyContinue}catch{}}
+  $raw=''
+  if(-not $found.Success){throw 'API Token not recognized. Do not copy @username or t.me link.'}
+  return $found.Groups[1].Value
+}
+
 function RandomHex([int]$count) {
   $b = New-Object byte[] $count
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -76,12 +90,21 @@ try {
   if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Node.js not installed.' }
   if (-not (Get-Command npx.cmd -ErrorAction SilentlyContinue)) { throw 'Node.js npm/npx not installed.' }
 
-  Write-Host 'Open @BotFather in Telegram and create your bot with /newbot if needed.'
-  Write-Host 'Paste its secret token into the HIDDEN prompt below. Never paste it into ChatGPT.'
-  $script:token = Read-Hidden 'BotFather token (hidden)'
-  if ($script:token -notmatch '^[0-9]{7,15}:[A-Za-z0-9_-]{25,}$') { throw 'Incorrect bot token format.' }
-  $me = Tg 'getMe'
-  if (-not $me.ok -or -not $me.result.is_bot) { throw 'Telegram bot token was not accepted.' }
+  Write-Host 'Use the bot you already created; do not send its token to ChatGPT.'
+  $me=$null
+  for($attempt=1;$attempt -le 3;$attempt++){
+    try{
+      $script:token=Read-Token-Safely
+      $me=Tg 'getMe'
+      if($me.ok -and $me.result.is_bot){break}
+    } catch {
+      Write-Host ('Attempt '+$attempt+': token not verified. Copy API Token again.') -ForegroundColor Yellow
+      $script:token=''
+    }
+  }
+  if(-not $me -or -not $me.ok -or -not $me.result.is_bot) {
+    throw 'Telegram bot token verification failed. Check @BotFather /mybots > API Token.'
+  }
   $username = [string]$me.result.username
   if ($username -notmatch '^[A-Za-z][A-Za-z0-9_]{4,31}$') { throw 'Invalid bot username.' }
   Write-Host ('Verified bot: @'+$username) -ForegroundColor Green
