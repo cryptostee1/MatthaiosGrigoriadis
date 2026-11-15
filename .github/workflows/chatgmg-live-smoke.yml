@@ -1,0 +1,77 @@
+name: ChatGMG live smoke (read-only)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgmg-readonly-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Verify published ChatGMG
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check live Pages alias (NO deployment or secrets)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error, sys
+          from datetime import datetime, timezone
+          base = 'https://chatgmg.pages.dev'
+          targets = {
+            '/': 'ChatGMG homepage',
+            '/gitonas/': 'GITONAS entry',
+            '/gitonas/connect/': 'GITONAS CONNECT application',
+            '/api/gitonas-connect/status': 'Telegram bridge status',
+            '/api/health': 'ChatGMG backend health'
+          }
+          findings=[]
+          failures=[]
+          for path,label in targets.items():
+              request=urllib.request.Request(base+path, headers={
+                'User-Agent':'ChatGMG-ReadOnly-Smoke/1.0',
+                'Accept':'application/json' if path.startswith('/api/') else 'text/html'
+              })
+              try:
+                  with urllib.request.urlopen(request,timeout=15) as response:
+                      code=response.status
+                      content=response.read(200000)
+                      content_type=response.headers.get('content-type','')
+                  state='HTTP '+str(code)
+                  if path == '/api/gitonas-connect/status':
+                      data=json.loads(content)
+                      # Presence of keys required; value reports live state as-is.
+                      for key in ('bot_connected','lead_delivery_ready'):
+                          if not isinstance(data.get(key),bool):
+                              failures.append('Malformed Telegram bridge status: '+key)
+                      state+=' bot_connected='+str(data.get('bot_connected'))+' lead_delivery_ready='+str(data.get('lead_delivery_ready'))
+                  if path == '/api/health':
+                      data=json.loads(content)
+                      if data.get('service') != 'ChatGMG LC-infinity':
+                          failures.append('Unexpected ChatGMG health schema')
+                  if code != 200: failures.append(path+' returned '+str(code))
+                  findings.append((label,path,state,'OK'))
+              except Exception as e:
+                  failures.append(path+' '+type(e).__name__+': '+str(e)[:220])
+                  findings.append((label,path,'ERROR','FAIL'))
+          lines=['# ChatGMG live smoke — read-only','',f'UTC: {datetime.now(timezone.utc).isoformat()}','',
+            '| Page | Path | Result | Verdict |','|---|---|---|---|']
+          lines += [f'| {label} | {path} | {state} | {verdict} |' for label,path,state,verdict in findings]
+          lines += ['',f'**Result:** {len(findings)-len(failures)} checks, {len(failures)} failure(s).',
+            'No production deployment, write actions, or credential access performed.']
+          if failures:
+              lines += ['','## Failures'] + ['- '+x for x in failures]
+          summary='\n'.join(lines)+'\n'
+          print(summary)
+          import os
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:f.write(summary)
+          sys.exit(1 if failures else 0)
+          PY
