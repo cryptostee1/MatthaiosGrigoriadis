@@ -1,6 +1,10 @@
 name: ChatGMG live smoke (read-only)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/chatgmg-live-smoke.yml
   workflow_dispatch:
   schedule:
     - cron: '17 4 * * *'
