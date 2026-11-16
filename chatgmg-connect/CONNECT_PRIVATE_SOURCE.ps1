@@ -34,8 +34,11 @@ try {
   Write-Host ('Checked '+$files.Count+' tracked files') -ForegroundColor Green
 
   Write-Host '2/6 Confirming GitHub sign-in...'
-  & $gh auth status --hostname github.com 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) {
+  $ErrorActionPreference = 'Continue'
+  & $gh auth status --hostname github.com *> $null
+  $needsLogin = ($LASTEXITCODE -ne 0)
+  $ErrorActionPreference = 'Stop'
+  if ($needsLogin) {
     Write-Host 'A GitHub page will open. Authorize GitHub CLI in your browser.'
     & $gh auth login --hostname github.com --git-protocol https --web --clipboard --scopes repo,workflow
     if ($LASTEXITCODE -ne 0) { throw 'GitHub sign-in was not completed' }
@@ -48,8 +51,11 @@ try {
   }
 
   Write-Host '3/6 Checking private repository...'
+  $ErrorActionPreference = 'Continue'
   $visibility = & $gh repo view $repo --json isPrivate --jq '.isPrivate' 2>$null
-  if ($LASTEXITCODE -ne 0) {
+  $repoMissing = ($LASTEXITCODE -ne 0)
+  $ErrorActionPreference = 'Stop'
+  if ($repoMissing) {
     Write-Host 'Creating private repository without uploading files...'
     & $gh repo create $repo --private --source . --remote origin --description 'ChatGMG Cloudflare Pages source and guarded release workflow'
     if ($LASTEXITCODE -ne 0) { throw 'Could not create private repository' }
@@ -60,8 +66,11 @@ try {
   if ($LASTEXITCODE -ne 0 -or $isPrivate -ne 'true') {
     throw 'Repository is not confirmed private: upload blocked'
   }
+  $ErrorActionPreference = 'Continue'
   $remote = & $git remote get-url origin 2>$null
-  if ($LASTEXITCODE -ne 0 -or -not $remote) {
+  $remoteMissing = ($LASTEXITCODE -ne 0)
+  $ErrorActionPreference = 'Stop'
+  if ($remoteMissing -or -not $remote) {
     & $git remote add origin "https://github.com/$repo.git"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to add Git remote' }
   } elseif ($remote -notlike "*github.com/$repo*") {
