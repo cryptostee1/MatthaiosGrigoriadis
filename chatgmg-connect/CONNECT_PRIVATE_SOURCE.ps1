@@ -19,6 +19,10 @@ try {
     if (-not $x) { throw 'Git missing' }
     $git = $x.Source
   }
+  # WinGet Git may be installed but not on PATH of an older PowerShell session.
+  # Ensure gh auth setup-git can resolve git.exe without requiring reboot.
+  $gitCmd = Split-Path -Parent $git
+  if (($env:Path -split ';') -notcontains $gitCmd) { $env:Path = $gitCmd + ';' + $env:Path }
   Set-Location $folder
   Write-Host '1/6 Verifying ChatGMG files (no upload yet)...'
   node --check '.\deploy\_worker.js'
